@@ -50,6 +50,7 @@ export function registerTools(server: McpServer): void {
   registerHelloTool(server);
   registerWeatherTool(server);
   registerFlightTrackerTool(server);
+  registerFlightAnalysisTool(server);
   registerAskLlmTool(server);
   registerLongTaskTool(server);
   registerLoadBonusTool(server);
@@ -191,11 +192,45 @@ function registerFlightTrackerTool(server: McpServer): void {
           };
         }
 
+        const airline = flight.airline ?? {};
+        const origin = flight.origin ?? {};
+        const destination = flight.destination ?? {};
+
+        const formatVal = (value: any, fallback = '-') => {
+          if (value === undefined || value === null || value === '') return fallback;
+          return String(value);
+        };
+
+        const formatAirport = (a: any) => {
+          const name = formatVal(a.name, '-');
+          const code = [a.icao_code, a.iata_code].filter(Boolean).join(' / ') || '-';
+          const location = [a.municipality, a.country_name].filter(Boolean).join(', ') || '-';
+          const coords =
+            a.latitude != null && a.longitude != null
+              ? `${a.latitude.toFixed(6)}, ${a.longitude.toFixed(6)}`
+              : '-';
+          const elev = a.elevation != null ? `${a.elevation} ft` : '-';
+          return `${name} (${code})\n  ${location}\n  Lat/Long: ${coords}\n  Elev: ${elev}`;
+        };
+
+        const flightCodes: string[] = [];
+        if (flight.callsign_icao) flightCodes.push(flight.callsign_icao);
+        if (flight.callsign_iata) flightCodes.push(flight.callsign_iata);
+
+        const flightCodeStr = flightCodes.length > 0 ? ` (${flightCodes.join(' / ')})` : '';
+
+        const humanText = `Flight: ${formatVal(flight.callsign, 'Unknown')}${flightCodeStr}\n` +
+          `Airline: ${formatVal(airline.name, 'Unknown')} (${[airline.icao, airline.iata].filter(Boolean).join(' / ') || '-'})` +
+          `${airline.country ? ` - ${airline.country} (${formatVal(airline.country_iso, '-')})` : ''}` +
+          `${airline.callsign ? `\n  Callsign: ${formatVal(airline.callsign, '-')}` : ''}\n\n` +
+          `Origin:\n${formatAirport(origin)}\n\n` +
+          `Destination:\n${formatAirport(destination)}`;
+
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(flight, null, 2),
+              text: humanText,
             },
           ],
           structuredContent: flight,
