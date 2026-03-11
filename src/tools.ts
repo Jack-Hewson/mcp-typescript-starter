@@ -49,6 +49,7 @@ let bonusToolLoaded = false;
 export function registerTools(server: McpServer): void {
   registerHelloTool(server);
   registerWeatherTool(server);
+  registerFlightTrackerTool(server);
   registerAskLlmTool(server);
   registerLongTaskTool(server);
   registerLoadBonusTool(server);
@@ -120,6 +121,98 @@ function registerWeatherTool(server: McpServer): void {
         content: [{ type: 'text', text: JSON.stringify(weather, null, 2) }],
         structuredContent: weather,
       };
+    }
+  );
+}
+
+/**
+ * Tool that looks up flight information using a plane tracking API.
+ */
+function registerFlightTrackerTool(server: McpServer): void {
+  server.registerTool(
+    'track_flight',
+    {
+      title: 'Track Flight',
+      description:
+        'Lookup a flight route by its callsign (e.g., AA100) using the ADSBDB API or simply select "Run tool" for a random flight code).',
+      inputSchema: {
+        flightnumber: z
+          .string()
+          .describe(
+            'Airline callsign (IATA/ICAO), e.g. SWA6320 (leave blank for a random callsign)'
+          ),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false, // Flight status may change between calls
+        openWorldHint: true, // Makes external HTTP requests
+      },
+    },
+    async ({ flightnumber }) => {
+      const baseUrl = process.env.ADSBDB_API_BASE_URL ?? 'https://api.adsbdb.com';
+      const callsign =
+        flightnumber.trim().toLowerCase() === ''
+          ? 'random'
+          : encodeURIComponent(flightnumber.trim());
+      const url = `${baseUrl}/v0/callsign/${callsign}`;
+
+      // ADSBDB can be queried without an API key but supports one via query or header.
+      const params = new URLSearchParams();
+      const requestUrl = params.toString() ? `${url}?${params.toString()}` : url;
+
+      try {
+        const response = await fetch(requestUrl, {});
+        if (!response.ok) {
+          const body = await response.text();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${response.status} ${response.statusText}\n${body}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const json = (await response.json()) as any;
+        // ADSBDB wraps the result under response.flightroute
+        const flight = json?.response?.flightroute ?? json;
+
+        if (!flight || (Array.isArray(flight) && flight.length === 0)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No flight data found for ${flightnumber}.`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(flight, null, 2),
+            },
+          ],
+          structuredContent: flight,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error fetching flight status: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            },
+          ],
+          isError: true,
+        };
+      }
     }
   );
 }
